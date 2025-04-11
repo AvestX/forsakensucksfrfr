@@ -3,6 +3,7 @@
 local Rayfield = loadstring(game:HttpGet("https://sirius.menu/rayfield"))()
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
+local VirtualBallsManager = game:GetService('VirtualInputManager')
 
 local highlightInstances = {}
 local staminaLoops = {}
@@ -10,15 +11,48 @@ local Do1x1PopupsLoop = false
 local isCorruptNatureEspActive = false
 local isGeneratorEspActive = false
 
+--Solve Gen Thingy
+local UserInputService = game:GetService("UserInputService")
+local solveGenKeybind = "G"  -- Default keybind
+local solveGenConnection
+
 
 local chanceaim = false
 local chanceaimbotLoop
-local chanceaimbotsounds = {
-    "Shoot",      -- replace with your actual sound names
-    "GunShot",
-    "Pew"
-}
 
+-- Modify the setupSolveGenKeybind function
+local function setupSolveGenKeybind()
+    if solveGenConnection then
+        solveGenConnection:Disconnect()
+        solveGenConnection = nil
+    end
+
+    solveGenConnection = UserInputService.InputBegan:Connect(function(input, gameProcessed)
+        if gameProcessed then return end
+        if input.KeyCode == Enum.KeyCode[solveGenKeybind] then
+            if not solveGenDebounce() then return end
+            
+            local found = false
+            for _, v in ipairs(workspace.Map.Ingame.Map:GetChildren()) do
+                if v.Name == "Generator" then
+                    local re = v:FindFirstChild("Remotes") and v.Remotes:FindFirstChild("RE")
+                    if re then 
+                        re:FireServer()
+                        found = true
+                    end
+                end
+            end
+            
+            if not found then
+                Rayfield:Notify({
+                    Title = "You're not working on a generator",
+                    Content = "No available generator to solve lol",
+                    Duration = 1.5
+                })
+            end
+        end
+    end)
+end
 
 -- Re-usable function to apply stamina boost
 local function infStaminaLogic(config)
@@ -150,8 +184,39 @@ local blatantTab = window:CreateTab("Blatant", 4483362458)
 
 local solveGenDebounce = debounce(2.5)
 
+
+-- Add these to your blatant tab section
+blatantTab:CreateInput({
+    Name = "Solve Generator Keybind",
+    PlaceholderText = "Enter key (e.g., G, F, T)",
+    RemoveTextAfterFocusLost = false,
+    Flag = "SolveGenKeybind",
+    CurrentValue = solveGenKeybind,
+    Callback = function(Text)
+        -- Convert input to uppercase and validate
+        Text = Text:upper()
+        if #Text == 1 and Text:match("%a") then
+            solveGenKeybind = Text
+            setupSolveGenKeybind()
+            
+            Rayfield:Notify({
+                Title = "Keybind Updated",
+                Content = "Solve Generator keybind set to: " .. Text,
+                Duration = 3
+            })
+        else
+            Rayfield:Notify({
+                Title = "Invalid Keybind",
+                Content = "Please enter a single letter (A-Z)",
+                Duration = 3
+            })
+        end
+    end,
+})
+
+-- Keep your existing button but modify it
 blatantTab:CreateButton({
-    Name = "Solve Generator",
+    Name = "Solve Generator (Press " .. solveGenKeybind .. ")",
     Callback = function()
         if not solveGenDebounce() then return end
         for _, v in ipairs(workspace.Map.Ingame.Map:GetChildren()) do
@@ -203,39 +268,61 @@ blatantTab:CreateToggle({
     Flag = "ChanceAutoAim",
     Callback = function(state)
         chanceaim = state
-        if game.Players.LocalPlayer.Character.Name ~= "Chance" and state then
+        if game.Players.LocalPlayer.Character and game.Players.LocalPlayer.Character.Name ~= "Chance" and state then
             Rayfield:Notify{
                 Title = "Wrong Character",
-                Content = "Oops, your current character isn't Chance, this POSSIBLY can bug out, so untoggle unless you're on Chance!",
+                Content = "You need to be using Chance for this feature to work properly!",
                 Duration = 5
             }
             return 
         end
 
         if state then
-            chanceaimbotLoop = game.Players.LocalPlayer.Character.HumanoidRootPart.ChildAdded:Connect(function(child)
+            -- Listen for the E ability activation
+            chanceaimbotLoop = game:GetService("UserInputService").InputBegan:Connect(function(input, gameProcessed)
                 if not chanceaim then return end
-                for _, v in pairs(chanceaimbotsounds) do
-                    if child.Name == v then
-                        local killer = game.Workspace.Players:FindFirstChild("Killers"):FindFirstChildOfClass("Model")
-                        if killer and killer:FindFirstChild("HumanoidRootPart") then
-                            local killerHRP = killer.HumanoidRootPart
-                            local playerHRP = game.Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-                            if playerHRP then
-                                local direction = (killerHRP.Position - playerHRP.Position).Unit
-                                local num = 1
-                                local maxIterations = 100
+                if gameProcessed then return end
+                if input.KeyCode ~= Enum.KeyCode.E then return end
 
-                                while num <= maxIterations do
-                                    task.wait(0.01)
-                                    num = num + 1
-                                    workspace.CurrentCamera.CFrame = CFrame.new(workspace.CurrentCamera.CFrame.Position, killerHRP.Position)
-                                    playerHRP.CFrame = CFrame.lookAt(playerHRP.Position, killerHRP.Position)
-                                end
-                            end
-                        end
+                -- Find the killer
+                local killer = game.Workspace.Players:FindFirstChild("Killers"):FindFirstChildOfClass("Model")
+                if not killer or not killer:FindFirstChild("HumanoidRootPart") then return end
+                
+                local killerHRP = killer.HumanoidRootPart
+                local player = game.Players.LocalPlayer.Character
+                if not player or not player:FindFirstChild("HumanoidRootPart") then return end
+                
+                local playerHRP = player.HumanoidRootPart
+                local startTime = tick()
+                local duration = 3 -- Exactly 3 seconds
+
+                -- Create a temporary loop for the 3-second duration
+                task.spawn(function()
+                    while tick() - startTime < duration and chanceaim do
+                        -- Update target position with slight prediction
+                        local targetPosition = killerHRP.Position + killerHRP.Velocity * 0.1
+                        
+                        -- Update camera and character orientation
+                        workspace.CurrentCamera.CFrame = CFrame.new(
+                            workspace.CurrentCamera.CFrame.Position, 
+                            targetPosition
+                        )
+                        
+                        playerHRP.CFrame = CFrame.new(
+                            playerHRP.Position, 
+                            Vector3.new(targetPosition.X, playerHRP.Position.Y, targetPosition.Z)
+                        )
+                        
+                        task.wait()
                     end
-                end
+                end)
+
+                -- Notification for activation
+                Rayfield:Notify({
+                    Title = "Chance Ability",
+                    Content = "Auto-aim active for 3 seconds",
+                    Duration = 2
+                })
             end)
         else
             if chanceaimbotLoop then
@@ -245,7 +332,6 @@ blatantTab:CreateToggle({
         end
     end,
 })
-
 blatantTab:CreateSection("Nothing extra to add here; still learning to script.")
 blatantTab:CreateDivider()
 
@@ -266,52 +352,110 @@ end
 
 local function toggleHighlightGen(state)
     isGeneratorEspActive = state
+    local mapConnection
+    local generatorConnections = {} -- Store individual generator connections
 
-    local function applyGeneratorHighlight(generator)
-        if generator.Name == "Generator" then
-            local existingHighlight = generator:FindFirstChild("GeneratorHighlight")
-            local progress = generator:FindFirstChild("Progress")
+    local function cleanupHighlights()
+        -- Cleanup existing highlights and connections
+        for _, connection in pairs(generatorConnections) do
+            connection:Disconnect()
+        end
+        generatorConnections = {}
 
-            if isGeneratorEspActive then
-                if not existingHighlight then
-                    createHighlight(generator, "GeneratorHighlight")
+        -- Remove existing highlights
+        if workspace.Map.Ingame and workspace.Map.Ingame.Map then
+            for _, v in pairs(workspace.Map.Ingame.Map:GetChildren()) do
+                if v.Name == "Generator" then
+                    local highlight = v:FindFirstChild("GeneratorHighlight")
+                    if highlight then highlight:Destroy() end
                 end
-            else
-                if existingHighlight then
-                    existingHighlight:Destroy()
-                end
-                return
-            end
-
-            if progress then
-                if progress.Value == 100 then
-                    local highlight = generator:FindFirstChild("GeneratorHighlight")
-                    if highlight then
-                        highlight:Destroy()
-                    end
-                    return
-                end
-
-                progress:GetPropertyChangedSignal("Value"):Connect(function()
-                    if progress.Value == 100 then
-                        local highlight = generator:FindFirstChild("GeneratorHighlight")
-                        if highlight then
-                            highlight:Destroy()
-                        end
-                    elseif isGeneratorEspActive and not generator:FindFirstChild("GeneratorHighlight") then
-                        createHighlight(generator, "GeneratorHighlight")
-                    end
-                end)
             end
         end
     end
 
-    for _, v in pairs(workspace.Map.Ingame.Map:GetChildren()) do
-        applyGeneratorHighlight(v)
+    local function applyGeneratorHighlight(generator)
+        if generator.Name ~= "Generator" then return end
+        
+        -- Clean up existing highlight
+        local existingHighlight = generator:FindFirstChild("GeneratorHighlight")
+        if existingHighlight then existingHighlight:Destroy() end
+
+        if not isGeneratorEspActive then return end
+
+        -- Create new highlight
+        local highlight = createHighlight(generator, "GeneratorHighlight")
+        local progress = generator:FindFirstChild("Progress")
+
+        if progress then
+            -- Remove highlight if generator is complete
+            if progress.Value == 100 then
+                highlight:Destroy()
+                return
+            end
+
+            -- Store connection for cleanup
+            generatorConnections[generator] = progress:GetPropertyChangedSignal("Value"):Connect(function()
+                if progress.Value == 100 then
+                    highlight:Destroy()
+                elseif not generator:FindFirstChild("GeneratorHighlight") and isGeneratorEspActive then
+                    createHighlight(generator, "GeneratorHighlight")
+                end
+            end)
+        end
     end
 
-    workspace.Map.Ingame.Map.ChildAdded:Connect(function(child)
-        applyGeneratorHighlight(child)
+    -- Clean up existing highlights first
+    cleanupHighlights()
+
+    if state then
+        -- Watch for map changes
+        mapConnection = workspace.Map.ChildAdded:Connect(function(child)
+            if child.Name == "Ingame" then
+                -- Clean up old connections and highlights
+                cleanupHighlights()
+
+                -- Setup new map monitoring
+                task.wait(1) -- Wait for map to load
+                if child:FindFirstChild("Map") then
+                    -- Apply to existing generators
+                    for _, v in pairs(child.Map:GetChildren()) do
+                        applyGeneratorHighlight(v)
+                    end
+
+                    -- Monitor for new generators
+                    generatorConnections["MapWatch"] = child.Map.ChildAdded:Connect(function(newChild)
+                        applyGeneratorHighlight(newChild)
+                    end)
+                end
+            end
+        end)
+
+        -- Apply to current map if it exists
+        if workspace.Map:FindFirstChild("Ingame") and workspace.Map.Ingame:FindFirstChild("Map") then
+            for _, v in pairs(workspace.Map.Ingame.Map:GetChildren()) do
+                applyGeneratorHighlight(v)
+            end
+
+            generatorConnections["MapWatch"] = workspace.Map.Ingame.Map.ChildAdded:Connect(function(child)
+                applyGeneratorHighlight(child)
+            end)
+        end
+    else
+        -- Cleanup when disabled
+        if mapConnection then
+            mapConnection:Disconnect()
+            mapConnection = nil
+        end
+        cleanupHighlights()
+    end
+
+    -- Cleanup when character resets or leaves
+    game:GetService("Players").LocalPlayer.CharacterRemoving:Connect(function()
+        if mapConnection then
+            mapConnection:Disconnect()
+            mapConnection = nil
+        end
+        cleanupHighlights()
     end)
 end
 
@@ -360,38 +504,156 @@ espTab:CreateToggle({
     Flag = "GenESP",
     Callback = function(value)
         toggleHighlightGen(value)
+        if value then
+        end
     end,
 })
 
--- Toggle the Coolkidd ESP
+-- Add these near the top with other variables
+local CorruptNatureEspConnection = nil
+local targetColors = {
+    HumanoidRootProjectile = Color3.fromRGB(255, 0, 0),   -- Red
+    PizzaDeliveryRig = Color3.fromRGB(255, 165, 0),       -- Orange
+    Bunny = Color3.fromRGB(255, 192, 203),                -- Pink
+    Mafiaso1 = Color3.fromRGB(0, 0, 255),                 -- Blue
+    Mafiaso2 = Color3.fromRGB(0, 255, 0),                 -- Green
+    Mafiaso3 = Color3.fromRGB(148, 0, 211)                -- Purple
+}
+
+-- Replace the existing corruptnatureesp function with this improved version
 local function corruptnatureesp(state)
     isCorruptNatureEspActive = state
-    for i, v in pairs(game.Workspace.Map.Ingame:GetChildren()) do
-        if v:IsA("Model") then
-            local existingHighlight = v:FindFirstChild("CorruptNatureHighlight")
-            if isCorruptNatureEspActive then
-                if not existingHighlight then
-                    if v.Name == "HumanoidRootProjectile" or v.Name == "PizzaDeliveryRig" or v.Name == "Bunny" or v.Name == "Mafiaso1" or v.Name == "Mafiaso2" or v.Name == "Mafiaso3" then
-                        local highlight = Instance.new("Highlight")
-                        highlight.Name = "CorruptNatureHighlight"
-                        highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-                        highlight.Parent = v
+    
+    -- Disconnect existing connection if there is one
+    if CorruptNatureEspConnection then
+        CorruptNatureEspConnection:Disconnect()
+        CorruptNatureEspConnection = nil
+    end
+    
+    -- Function to apply highlight to an object
+    local function applyHighlight(object)
+        if not object:IsA("Model") then return end
+        
+        -- List of models to highlight
+        local targetNames = {
+            "HumanoidRootProjectile",
+            "PizzaDeliveryRig",
+            "Bunny",
+            "Mafiaso1",
+            "Mafiaso2",
+            "Mafiaso3"
+        }
+        
+        -- Check if the object should be highlighted
+        if table.find(targetNames, object.Name) then
+            -- Only create highlight if it doesn't exist
+            if not object:FindFirstChild("CorruptNatureHighlight") then
+                local highlight = Instance.new("Highlight")
+                highlight.Name = "CorruptNatureHighlight"
+                highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+                highlight.FillColor = targetColors[object.Name] or Color3.new(1, 1, 1)
+                highlight.Parent = object
+                
+                -- Add distance label
+                local distanceLabel = Instance.new("BillboardGui")
+                distanceLabel.Name = "DistanceLabel"
+                distanceLabel.Size = UDim2.new(0, 200, 0, 50)
+                distanceLabel.StudsOffset = Vector3.new(0, 2, 0)
+                distanceLabel.AlwaysOnTop = true
+                
+                local textLabel = Instance.new("TextLabel")
+                textLabel.Size = UDim2.new(1, 0, 1, 0)
+                textLabel.BackgroundTransparency = 1
+                textLabel.TextColor3 = Color3.new(1, 1, 1)
+                textLabel.Font = Enum.Font.SourceSansBold
+                textLabel.TextSize = 14
+                textLabel.Parent = distanceLabel
+                
+                distanceLabel.Parent = object
+                
+                -- Update distance
+                spawn(function()
+                    while object and object.Parent and isCorruptNatureEspActive do
+                        if Players.LocalPlayer.Character and Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+                            local distance = (object:GetPivot().Position - Players.LocalPlayer.Character.HumanoidRootPart.Position).Magnitude
+                            textLabel.Text = string.format("[%s]\n%.1f studs", object.Name, distance)
+                        end
+                        task.wait(0.1)
                     end
-                end
-            else
-                if existingHighlight then
-                    existingHighlight:Destroy()
-                end
+                end)
             end
+        end
+    end
+    
+    -- Function to remove highlight from an object
+    local function removeHighlight(object)
+        local highlight = object:FindFirstChild("CorruptNatureHighlight")
+        local distanceLabel = object:FindFirstChild("DistanceLabel")
+        if highlight then
+            highlight:Destroy()
+        end
+        if distanceLabel then
+            distanceLabel:Destroy()
+        end
+    end
+    
+    if state then
+        -- Initial check for existing objects
+        for _, v in pairs(game.Workspace.Map.Ingame:GetChildren()) do
+            applyHighlight(v)
+        end
+        
+        -- Set up continuous monitoring
+        CorruptNatureEspConnection = game.Workspace.Map.Ingame.ChildAdded:Connect(function(newObject)
+            if isCorruptNatureEspActive then
+                applyHighlight(newObject)
+            end
+        end)
+    else
+        -- Remove all existing highlights
+        for _, v in pairs(game.Workspace.Map.Ingame:GetChildren()) do
+            removeHighlight(v)
         end
     end
 end
 
+-- Add these configuration toggles above the main Coolkidd ESP toggle
+espTab:CreateSection("Coolkidd ESP Settings")
+
+-- Replace the existing Coolkidd ESP toggle with this updated version
 espTab:CreateToggle({
     Name = "Coolkidd ESP",
     Flag = "CoolkiddEsp",
     CurrentValue = false,
     Callback = function(value)
         corruptnatureesp(value)
+        
+        if value then
+            Rayfield:Notify({
+                Title = "Coolkidd ESP Enabled",
+                Content = "Now monitoring for summoned entities",
+                Duration = 3,
+            })
+        end
     end,
 })
+
+
+-- Initialize keybind and configurations
+setupSolveGenKeybind() -- Initialize the keybind system
+
+-- Set up cleanup handlers
+game:GetService("Players").LocalPlayer.CharacterRemoving:Connect(function()
+    if solveGenConnection then
+        solveGenConnection:Disconnect()
+    end
+    if chanceaimbotLoop then
+        chanceaimbotLoop:Disconnect()
+    end
+    if CorruptNatureEspConnection then
+        CorruptNatureEspConnection:Disconnect()
+    end
+end)
+
+-- Load saved configurations
+Rayfield:LoadConfiguration()
