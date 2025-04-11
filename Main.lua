@@ -24,7 +24,7 @@ local window = Rayfield:CreateWindow({
         Key      = { "PWNED" },
     },
 })
-Rayfield:Notify({ Title = "Thanks!", Content = "…one of the safest ways to exploit Forsaken.", Duration = 6.5 })
+Rayfield:Notify({ Title = "Thanks for using .Vest Hub", Content = "Weither its released or not, thank you for using my script.", Duration = 6.5 })
 
 -- Debounce helper (single definition)
 local function debounce(sec)
@@ -293,6 +293,29 @@ espTab:CreateToggle({
     Callback     = toggleGenESP,
 })
 
+--──────────────────────────────────────────────────────────────────────────────
+-- Event-Driven Reinitialization
+--──────────────────────────────────────────────────────────────────────────────
+workspace.Map.ChildAdded:Connect(function(child)
+    if child.Name == "Ingame" then
+        child.ChildAdded:Wait()
+        if Rayfield.Flags.GenESP.CurrentValue then
+            toggleGenESP(false)
+            toggleGenESP(true)
+        end
+    end
+end)
+
+Players.LocalPlayer.CharacterAdded:Connect(function()
+    if Rayfield.Flags.ChanceAutoAim.CurrentValue then
+        chanceEnabled = true
+        Rayfield:Notify({
+            Title = "Chance",
+            Content = "Re-enabled after respawn",
+            Duration = 1.5
+        })
+    end
+end)
 --──────────────────────────────────────────────────────────────────────────────
 -- Finalize
 --──────────────────────────────────────────────────────────────────────────────
