@@ -1,5 +1,3 @@
---DO NOT SKID.
-
 local Rayfield = loadstring(game:HttpGet("https://sirius.menu/rayfield"))()
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
@@ -11,16 +9,29 @@ local Do1x1PopupsLoop = false
 local isCorruptNatureEspActive = false
 local isGeneratorEspActive = false
 
+-- Utility function for debounce
+local function debounce(duration)
+    local lastCall = 0
+    return function()
+        local now = tick()
+        if now - lastCall >= duration then
+            lastCall = now
+            return true
+        end
+        return false
+    end
+end
+
 --Solve Gen Thingy
 local UserInputService = game:GetService("UserInputService")
 local solveGenKeybind = "G"  -- Default keybind
 local solveGenConnection
-
+local solveGenDebounce = debounce(2.5)
 
 local chanceaim = false
 local chanceaimbotLoop
+local gameStateConnection
 
--- Modify the setupSolveGenKeybind function
 local function setupSolveGenKeybind()
     if solveGenConnection then
         solveGenConnection:Disconnect()
@@ -31,6 +42,18 @@ local function setupSolveGenKeybind()
         if gameProcessed then return end
         if input.KeyCode == Enum.KeyCode[solveGenKeybind] then
             if not solveGenDebounce() then return end
+            
+            -- Add error handling for missing map
+            if not workspace:FindFirstChild("Map") or 
+               not workspace.Map:FindFirstChild("Ingame") or 
+               not workspace.Map.Ingame:FindFirstChild("Map") then
+                Rayfield:Notify({
+                    Title = "Error",
+                    Content = "Map not loaded or round not started",
+                    Duration = 1.5
+                })
+                return
+            end
             
             local found = false
             for _, v in ipairs(workspace.Map.Ingame.Map:GetChildren()) do
@@ -43,16 +66,53 @@ local function setupSolveGenKeybind()
                 end
             end
             
-            if not found then
+            if found then
                 Rayfield:Notify({
-                    Title = "You're not working on a generator",
-                    Content = "No available generator to solve lol",
+                    Title = "Generator Solved",
+                    Content = "Successfully activated generator",
+                    Duration = 1.5
+                })
+            else
+                Rayfield:Notify({
+                    Title = "No Generator Found",
+                    Content = "No available generator to solve",
                     Duration = 1.5
                 })
             end
         end
     end)
 end
+
+local function setupGameStateHandling()
+    if gameStateConnection then
+        gameStateConnection:Disconnect()
+    end
+    
+    gameStateConnection = task.spawn(function()
+        while task.wait(4) do  -- Check every 4 seconds
+            -- Reinitialize Generator ESP if active
+            if isGeneratorEspActive then
+                toggleHighlightGen(false)
+                toggleHighlightGen(true)
+            end
+            
+            -- Reinitialize Chance aimbot if active
+            if chanceaim then
+                if chanceaimbotLoop then
+                    chanceaimbotLoop:Disconnect()
+                end
+                local toggle = Rayfield.Flags.ChanceAutoAim
+                if toggle then
+                    toggle:Set(true)
+                end
+            end
+            
+            -- Reinitialize solve generator keybind
+            setupSolveGenKeybind()
+        end
+    end)
+end
+
 
 -- Re-usable function to apply stamina boost
 local function infStaminaLogic(config)
@@ -503,12 +563,21 @@ espTab:CreateToggle({
     CurrentValue = false,
     Flag = "GenESP",
     Callback = function(value)
+        if value then
+            -- Force refresh when enabling
+            toggleHighlightGen(false)
+            task.wait(0.1)
+        end
         toggleHighlightGen(value)
         if value then
+            Rayfield:Notify({
+                Title = "Generator ESP",
+                Content = "Now tracking generators",
+                Duration = 2
+            })
         end
     end,
 })
-
 -- Add these near the top with other variables
 local CorruptNatureEspConnection = nil
 local targetColors = {
@@ -638,10 +707,6 @@ espTab:CreateToggle({
     end,
 })
 
-
--- Initialize keybind and configurations
-setupSolveGenKeybind() -- Initialize the keybind system
-
 -- Set up cleanup handlers
 game:GetService("Players").LocalPlayer.CharacterRemoving:Connect(function()
     if solveGenConnection then
@@ -657,3 +722,6 @@ end)
 
 -- Load saved configurations
 Rayfield:LoadConfiguration()
+
+-- Initialize the game state handling
+setupGameStateHandling()
